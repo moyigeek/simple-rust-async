@@ -1,0 +1,15 @@
+[package]
+name = "rust-async-runtime"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+async-std = "1.10.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "rust_async_runtime"
+path = "src/lib.rs"
