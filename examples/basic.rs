@@ -1,18 +1,20 @@
-use std::time::Duration;
 use rust_async_runtime::Runtime;
+use std::time::Duration;
+use std::thread;
 
-async fn async_print(id: u32) {
-    println!("Task {} started", id);
-    // Simulate some async work
-    std::thread::sleep(Duration::from_secs(1));
-    println!("Task {} completed", id);
+async fn delayed_print(msg: &str, delay: Duration) {
+    std::thread::sleep(delay);
+    println!("{}", msg);
 }
 
 fn main() {
     let mut runtime = Runtime::new();
-    
-    runtime.block_on(async {
-        async_print(1).await;
-        async_print(2).await;
-    });
+
+    runtime.spawn(delayed_print("Task 1", Duration::from_secs(1)));
+    runtime.spawn(delayed_print("Task 2", Duration::from_secs(2)));
+
+    loop {
+        runtime.run_non_blocking();
+        thread::sleep(Duration::from_millis(100));
+    }
 }

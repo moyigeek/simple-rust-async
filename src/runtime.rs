@@ -1,52 +1,67 @@
-//! Runtime module providing the main interface to the async runtime.
-//!
-//! This module exposes the Runtime type which serves as the primary API for users.
-
 use std::future::Future;
+use std::sync::mpsc::{channel, Sender, Receiver};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use crate::executor::Executor;
+use crate::task::Task;
 
-/// The main runtime type for executing async tasks.
-///
-/// Runtime provides a high-level interface for spawning and managing async tasks.
 pub struct Runtime {
-    /// The underlying executor that handles task execution
     executor: Executor,
+    task_sender: Sender<Arc<Task>>,
+    task_receiver: Receiver<Arc<Task>>,
+    timer_wheel: TimerWheel,
+}
+
+struct TimerWheel {
+    timers: Vec<(Instant, Arc<Task>)>,
 }
 
 impl Runtime {
-    /// Creates a new Runtime instance.
-    ///
-    /// # Returns
-    ///
-    /// A new Runtime ready to accept tasks
     pub fn new() -> Self {
+        let (tx, rx) = channel();
         Runtime {
             executor: Executor::new(),
+            task_sender: tx,
+            task_receiver: rx,
+            timer_wheel: TimerWheel { timers: Vec::new() },
         }
     }
 
-    /// Spawns a future onto the runtime.
-    ///
-    /// # Arguments
-    ///
-    /// * `future` - The future to spawn
-    pub fn spawn<F>(&mut self, future: F)
+    pub fn spawn<F>(&self, future: F) 
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.executor.spawn(future);
+        let task = Arc::new(Task::new(future));
+        self.task_sender.send(task).expect("Failed to send task");
     }
 
-    /// Runs a future to completion, blocking the current thread.
-    ///
-    /// # Arguments
-    ///
-    /// * `future` - The future to run to completion
-    pub fn block_on<F>(&mut self, future: F)
+    pub fn spawn_after<F>(&mut self, future: F, delay: Duration)
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.spawn(future);
-        self.executor.run();
+        let task = Arc::new(Task::new(future));
+        let deadline = Instant::now() + delay;
+        self.timer_wheel.timers.push((deadline, task));
+    }
+
+    pub fn run_non_blocking(&mut self) {
+        // Process ready tasks
+        while let Ok(task) = self.task_receiver.try_recv() {
+            self.executor.spawn_task(task);
+        }
+
+        // Check timers
+        let now = Instant::now();
+        self.timer_wheel.timers.retain(|(deadline, task)| {
+            if *deadline <= now {
+                self.executor.spawn_task(task.clone());
+                false
+            } else {
+                true 
+            }
+        });
+
+        // Run one iteration of executor
+        self.executor.run_once();
     }
 }
